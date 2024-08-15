@@ -6,9 +6,9 @@
 """
 Biblioteca Gráfica / Graphics Library.
 
-Desenvolvido por: <SEU NOME AQUI>
+Desenvolvido por: Luciano Felix
 Disciplina: Computação Gráfica
-Data: <DATA DE INÍCIO DA IMPLEMENTAÇÃO>
+Data: 14/08/2014
 """
 
 import time         # Para operações com tempo
@@ -47,12 +47,12 @@ class GL:
         print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
         print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 0])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
-        
+        coords = np.array(point, dtype=np.int32).reshape(-1, 2).tolist()
+        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
+
+        for xy in coords:
+            gpu.GPU.draw_pixel(xy, gpu.GPU.RGB8, color)
+
     @staticmethod
     def polyline2D(lineSegments, colors):
         """Função usada para renderizar Polyline2D."""
@@ -68,12 +68,44 @@ class GL:
 
         print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
         print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
+
+        p0, p1 = np.array(lineSegments, dtype=np.int32).reshape(-1, 2)
+        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
+
+        # Bresenham's line algorithm
+        dp = p1 - p0
+        dx, dy = np.abs(dp)
+        sx, sy = np.sign(dp)
+        x, y = p0
+
+        if dx > dy:
+            err = dx / 2.0
+
+            while x != p1[0]:
+                gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
+
+                err -= dy
+
+                if err < 0:
+                    y += sy
+                    err += dx
+
+                x += sx
+        else:
+            err = dy / 2.0
+
+            while y != p1[1]:
+                gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
+
+                err -= dx
+
+                if err < 0:
+                    x += sx
+                    err += dy
+
+                y += sy
+
+        gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
 
     @staticmethod
     def circle2D(radius, colors):
@@ -106,8 +138,19 @@ class GL:
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo:
-        gpu.GPU.draw_pixel([6, 8], gpu.GPU.RGB8, [255, 255, 0])  # altera pixel (u, v, tipo, r, g, b)
+        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
+        p = np.array(vertices, dtype=np.int32).reshape(-1, 2)
+        x, y = p.T.astype(np.int32)
+        vec = np.diff(np.pad(p.T, ((0, 0), (0, 1)), "wrap"), axis=1).T
+        norm = vec @ np.array([[0, 1], [-1, 0]], dtype=np.int32)
+        bx = np.arange(np.min(x), np.max(x) + 1)
+        by = np.arange(np.min(y), np.max(y) + 1)
+
+        for i, j in np.ndindex(len(bx), len(by)):
+            q = np.array((bx[i], by[j]), dtype=np.int32)
+
+            if all(np.dot(q - o, n) <= 0 for o, n in zip(p, norm)):
+                gpu.GPU.draw_pixel((q[0], q[1]), gpu.GPU.RGB8, color)
 
 
     @staticmethod
