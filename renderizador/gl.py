@@ -24,6 +24,9 @@ class GL:
     near = 0.01   # plano de corte próximo
     far = 1000    # plano de corte distante
 
+    transform_stack = []
+    transform_matrix = np.identity(4)
+
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
         """Definr parametros para câmera de razão de aspecto, plano próximo e distante."""
@@ -31,6 +34,14 @@ class GL:
         GL.height = height
         GL.near = near
         GL.far = far
+        GL.transform_stack = []
+
+        GL.screen_matrix = np.array([
+            [width/2,       0.0, 0.0,  width/2],
+            [    0.0, -height/2, 0.0, height/2],
+            [    0.0,       0.0, 1.0,      0.0],
+            [    0.0,       0.0, 0.0,      1.0],
+        ])
 
     @staticmethod
     def polypoint2D(point, colors):
@@ -42,15 +53,15 @@ class GL:
         # pelo tamanho da lista e assuma que sempre vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polypoint2D
         # você pode assumir inicialmente o desenho dos pontos com a cor emissiva (emissiveColor).
+        coords = np.array(point, dtype=np.int32).reshape(-1, 2)
+        coords = coords[
+            (coords[:, 0] >= 0) & (coords[:, 0] < GL.height - 1) &
+            (coords[:, 1] >= 0) & (coords[:, 1] < GL.width - 1)
+        ]
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
-        coords = np.array(point, dtype=np.int32).reshape(-1, 2).tolist()
         color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
 
-        for xy in coords:
+        for xy in coords.tolist():
             gpu.GPU.draw_pixel(xy, gpu.GPU.RGB8, color)
 
     @staticmethod
@@ -65,11 +76,7 @@ class GL:
         # vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polyline2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-
-        print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
-        print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
-        p0, p1 = np.array(lineSegments, dtype=np.int32).reshape(-1, 2)
+        p0, p1 = np.array(lineSegments, dtype=np.int32).reshape(-1, 2).clip((0, 0), (GL.width - 1, GL.height - 1))
         color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
 
         # Bresenham's line algorithm
@@ -113,11 +120,7 @@ class GL:
         # Nessa função você receberá um valor de raio e deverá desenhar o contorno de
         # um círculo.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Circle2D
-        # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).
-
-        print("Circle2D : radius = {0}".format(radius)) # imprime no terminal
-        print("Circle2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
+        # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).        
         color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
         bx = np.arange(0, radius, dtype=np.int32)
         by = np.arange(0, radius, dtype=np.int32)
@@ -125,7 +128,6 @@ class GL:
         for i, j in np.ndindex(len(bx), len(by)):
             if np.hypot(bx[i], by[j]) <= radius:
                 gpu.GPU.draw_pixel((bx[i], by[j]), gpu.GPU.RGB8, color)
-
 
     @staticmethod
     def triangleSet2D(vertices, colors):
@@ -137,23 +139,20 @@ class GL:
         # quantidade de pontos é sempre multiplo de 3, ou seja, 6 valores ou 12 valores, etc.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o TriangleSet2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
-        print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
         color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
         p = np.array(vertices, dtype=np.int32).reshape(-1, 2)
+
         x, y = p.T.astype(np.int32)
         vec = np.diff(np.pad(p.T, ((0, 0), (0, 1)), "wrap"), axis=1).T
         norm = vec @ np.array([[0, 1], [-1, 0]], dtype=np.int32)
-        bx = np.arange(np.min(x), np.max(x) + 1)
-        by = np.arange(np.min(y), np.max(y) + 1)
+        bx = np.arange(max(0, np.min(x)), min(GL.width - 1, np.max(x)) + 1)
+        by = np.arange(max(0, np.min(y)), min(GL.height - 1, np.max(y)) + 1)
 
         for i, j in np.ndindex(len(bx), len(by)):
-            q = np.array((bx[i], by[j]), dtype=np.int32)
+            q = np.array((bx[i], by[j])).astype(np.int32)
 
             if all(np.dot(q - o, n) <= 0 for o, n in zip(p, norm)):
                 gpu.GPU.draw_pixel((q[0], q[1]), gpu.GPU.RGB8, color)
-
 
     @staticmethod
     def triangleSet(point, colors):
@@ -170,13 +169,19 @@ class GL:
         # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
+        triangles = np.array(point).reshape(-1, 3, 3)
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        for triangle in triangles:
+            points = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+            for vertex in triangle:
+                v = np.pad(vertex, (0, 1), mode="constant", constant_values=1.0)
+                v = GL.viewpoint_matrix @ GL.transform_matrix @ v
+                x, y, z, w = GL.screen_matrix @ (v / v[3])
+
+                points.extend([x, y])
+
+            GL.triangleSet2D(points[::1], colors)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -184,12 +189,72 @@ class GL:
         # Na função de viewpoint você receberá a posição, orientação e campo de visão da
         # câmera virtual. Use esses dados para poder calcular e criar a matriz de projeção
         # perspectiva para poder aplicar nos pontos dos objetos geométricos.
+        rotation = GL.transform_rotate(orientation)
+        translation = GL.transform_translate([-n for n in position])
+        look_at = np.linalg.inv(np.linalg.inv(translation) @ np.linalg.inv(rotation))
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Viewpoint : ", end='')
-        print("position = {0} ".format(position), end='')
-        print("orientation = {0} ".format(orientation), end='')
-        print("fieldOfView = {0} ".format(fieldOfView))
+        fov_y = 2 * np.arctan(np.tan(fieldOfView / 2) * (GL.height / np.hypot(GL.width, GL.height)))
+        top = GL.near * np.tan(fov_y)
+        right = top * GL.width / GL.height
+
+        x = GL.near / right
+        y = GL.near / top
+        z = ((-GL.near - GL.far) / (GL.near - GL.far))
+        l = -2 * GL.far * GL.near / (GL.far - GL.near)
+
+        perspective = np.array([
+            [x, 0,  0, 0],
+            [0, y,  0, 0],
+            [0, 0,  z, l],
+            [0, 0, -1, 0],
+        ])
+
+        GL.viewpoint_matrix = perspective @ look_at
+
+    @staticmethod
+    def transform_translate(translation):
+        matrix = np.array([
+            [1.0, 0.0, 0.0, translation[0]],
+            [0.0, 1.0, 0.0, translation[1]],
+            [0.0, 0.0, 1.0, translation[2]],
+            [0.0, 0.0, 0.0,            1.0],
+        ])
+
+        return matrix
+
+    @staticmethod
+    def transform_scale(scale):
+        matrix = np.array([
+            [scale[0],      0.0,      0.0, 0.0],
+            [     0.0, scale[1],      0.0, 0.0],
+            [     0.0,      0.0, scale[2], 0.0],
+            [     0.0,      0.0,      0.0, 1.0],
+        ])
+
+        return matrix
+
+    @staticmethod
+    def transform_rotate(orientation):
+        theta = orientation[3]
+
+        quaternion = np.array([
+            np.cos(theta / 2),
+            np.sin(theta / 2) * orientation[0],
+            np.sin(theta / 2) * orientation[1],
+            np.sin(theta / 2) * orientation[2],
+        ])
+
+        norm = np.linalg.norm(quaternion)
+        r, i, j, k = quaternion / norm
+
+        matrix = np.array([
+            [1-2*(j*j+k*k),   2*(i*j-k*r),   2*(i*k+j*r), 0.0],
+            [  2*(i*j+k*r), 1-2*(i*i+k*k),   2*(j*k-i*r), 0.0],
+            [  2*(i*k-j*r),   2*(j*k+i*r), 1-2*(i*i+j*j), 0.0],
+            [          0.0,           0.0,           0.0, 1.0],
+        ])
+
+        return matrix
 
     @staticmethod
     def transform_in(translation, scale, rotation):
@@ -201,16 +266,14 @@ class GL:
         # do objeto ao redor do eixo x, y, z por t radianos, seguindo a regra da mão direita.
         # Quando se entrar em um nó transform se deverá salvar a matriz de transformação dos
         # modelos do mundo em alguma estrutura de pilha.
+        matrix = GL.transform_translate(translation) @ GL.transform_scale(scale) @ GL.transform_rotate(rotation)
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Transform : ", end='')
-        if translation:
-            print("translation = {0} ".format(translation), end='') # imprime no terminal
-        if scale:
-            print("scale = {0} ".format(scale), end='') # imprime no terminal
-        if rotation:
-            print("rotation = {0} ".format(rotation), end='') # imprime no terminal
-        print("")
+        GL.transform_stack.append(matrix)
+
+        GL.transform_matrix = GL.transform_stack[-1]
+
+        for layer in GL.transform_stack[:-1:-1]:
+            GL.transform_matrix = GL.transform_matrix @ layer
 
     @staticmethod
     def transform_out():
@@ -220,8 +283,15 @@ class GL:
         # deverá recuperar a matriz de transformação dos modelos do mundo da estrutura de
         # pilha implementada.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Saindo de Transform")
+        GL.transform_stack.pop()
+
+        if len(GL.transform_stack) == 0:
+            return
+
+        GL.transform_matrix = GL.transform_stack[-1]
+
+        for layer in GL.transform_stack[:-1:-1]:
+            GL.transform_matrix = GL.transform_matrix @ layer
 
     @staticmethod
     def triangleStripSet(point, stripCount, colors):
