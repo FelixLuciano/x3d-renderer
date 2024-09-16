@@ -306,16 +306,20 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
+        points = np.array(point).reshape(-1, 3)
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleStripSet : pontos = {0} ".format(point), end='')
-        for i, strip in enumerate(stripCount):
-            print("strip[{0}] = {1} ".format(i, strip), end='')
-        print("")
-        print("TriangleStripSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        triangles = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        for strip_size in stripCount:
+            for i in range(strip_size - 2):
+                triangle = [points[i], points[i + 1], points[i + 2]]
+
+                if i % 2 == 1:
+                    triangle = triangle[::-1]
+
+                triangles.append(triangle)
+        
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def indexedTriangleStripSet(point, index, colors):
@@ -331,13 +335,20 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
+        points = np.array(point).reshape(-1, 3)
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedTriangleStripSet : pontos = {0}, index = {1}".format(point, index))
-        print("IndexedTriangleStripSet : colors = {0}".format(colors)) # imprime as cores
+        triangles = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        for i in range(len(index) - 3):
+            i1, i2, i3 = index[i: i + 3]
+            triangle = [points[i1], points[i2], points[i3]]
+
+            if i % 2 == 1:
+                triangle = triangle[::-1]
+
+            triangles.append(triangle)
+        
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def box(size, colors):
