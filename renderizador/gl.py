@@ -314,19 +314,20 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
-        points = np.array(point).reshape(-1, 3)
-
+        offset = 0
         triangles = []
 
         for strip_size in stripCount:
-            for i in range(strip_size - 2):
-                triangle = [points[i], points[i + 1], points[i + 2]]
-
-                if i % 2 == 1:
-                    triangle = triangle[::-1]
+            for index in range(strip_size - 2):
+                i1 = (offset + index + 0) * 3
+                i2 = (offset + index + 1) * 3
+                i3 = (offset + index + 2) * 3
+                triangle = [point[i1:i1+3], point[i2:i2+3], point[i3:i3+3]]
 
                 triangles.append(triangle)
-        
+
+            offset += strip_size
+
         GL.triangleSet(triangles, colors)
 
     @staticmethod
@@ -382,24 +383,29 @@ class GL:
         # textura para o poligono, para isso, use as coordenadas de textura e depois aplique a
         # cor da textura conforme a posição do mapeamento. Dentro da classe GPU já está
         # implementadado um método para a leitura de imagens.
+        start = 0
+        while start < len(coordIndex):
+            try:
+                end = coordIndex.index(-1, start)
+            except ValueError:
+                break
 
-        # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedFaceSet : ")
-        if coord:
-            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        print("colorPerVertex = {0}".format(colorPerVertex))
-        if colorPerVertex and color and colorIndex:
-            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        if texCoord and texCoordIndex:
-            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
-        if current_texture:
-            image = gpu.GPU.load_texture(current_texture[0])
-            print("\t Matriz com image = {0}".format(image))
-            print("\t Dimensões da image = {0}".format(image.shape))
-        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+            indexes = coordIndex[start:end]
+            i0 = indexes[0] * 3
+            p0 = coord[i0 : i0+3]
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+            triangles = []
+            for index in range(1, len(indexes) - 1):
+                i1 = indexes[index] * 3
+                i2 = indexes[index+1] * 3
+                p1 = coord[i1 : i1+3]
+                p2 = coord[i2 : i2+3]
+
+                triangles.append([p0, p1, p2])
+            
+            GL.triangleSet(triangles, colors)
+
+            start = end + 1
 
     @staticmethod
     def box(size, colors):
