@@ -324,6 +324,9 @@ class GL:
                 i3 = (offset + index + 2) * 3
                 triangle = [point[i1:i1+3], point[i2:i2+3], point[i3:i3+3]]
 
+                if index % 2 != 0:
+                    triangle = triangle[::-1]
+
                 triangles.append(triangle)
 
             offset += strip_size
