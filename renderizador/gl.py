@@ -28,12 +28,13 @@ class GL:
     transform_matrix = np.identity(4)
 
     @staticmethod
-    def setup(width, height, near=0.01, far=1000):
+    def setup(width, height, near=0.01, far=1000, samplerate=1):
         """Definr parametros para câmera de razão de aspecto, plano próximo e distante."""
         GL.width = width
         GL.height = height
         GL.near = near
         GL.far = far
+        GL.samplerate = samplerate
         GL.transform_stack = []
 
         GL.screen_matrix = np.array([
@@ -42,6 +43,9 @@ class GL:
             [    0.0,       0.0, 1.0,      0.0],
             [    0.0,       0.0, 0.0,      1.0],
         ])
+
+        GL.width *= samplerate
+        GL.height *= samplerate
 
     @staticmethod
     def polypoint2D(point, colors):
@@ -54,16 +58,11 @@ class GL:
         # pelo tamanho da lista e assuma que sempre vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polypoint2D
         # você pode assumir inicialmente o desenho dos pontos com a cor emissiva (emissiveColor).
-        coords = np.array(point, dtype=np.int32).reshape(-1, 2)
-        coords = coords[
-            (coords[:, 0] >= 0) & (coords[:, 0] < GL.height - 1) &
-            (coords[:, 1] >= 0) & (coords[:, 1] < GL.width - 1)
-        ]
-
+        coords = np.array(point).reshape(-1, 2).clip((0, 0), (GL.width - 1, GL.height - 1))
         color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
 
-        for xy in coords.tolist():
-            gpu.GPU.draw_pixel(xy, gpu.GPU.RGB8, color)
+        for coord in np.rint(coords).astype(np.uint32).tolist():
+            gpu.GPU.draw_pixel(coord, gpu.GPU.RGB8, color)
 
     @staticmethod
     def polyline2D(lineSegments, colors):
@@ -78,43 +77,44 @@ class GL:
         # vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polyline2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        p0, p1 = np.array(lineSegments, dtype=np.int32).reshape(-1, 2).clip((0, 0), (GL.width - 1, GL.height - 1))
-        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
+        points = []
+        anchors = np.array(lineSegments).reshape(-1, 2)
 
-        # Bresenham's line algorithm
-        dp = p1 - p0
-        dx, dy = np.abs(dp)
-        sx, sy = np.sign(dp)
-        x, y = p0
+        for p0, p1 in zip(anchors[:-1], anchors[1:]):
+            # Bresenham's line algorithm
+            dp = p1 - p0
+            dx, dy = np.abs(dp)
+            sx, sy = np.sign(dp) / GL.samplerate
+            x, y = p0
 
-        if dx > dy:
-            err = dx / 2.0
+            if dx > dy:
+                err = dx / 2.0
 
-            while x != p1[0]:
-                gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
+                while not np.isclose(x, p1[0], 0.05, 0.05):
+                    points.extend((x * GL.samplerate, y * GL.samplerate))
 
-                err -= dy
+                    err -= dy
 
-                if err < 0:
-                    y += sy
-                    err += dx
+                    if err < 0:
+                        y += sy
+                        err += dx
 
-                x += sx
-        else:
-            err = dy / 2.0
-
-            while y != p1[1]:
-                gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
-
-                err -= dx
-
-                if err < 0:
                     x += sx
-                    err += dy
+            else:
+                err = dy / 2.0
 
-                y += sy
+                while not np.isclose(y, p1[1], 0.05, 0.05):
+                    points.extend((x * GL.samplerate, y * GL.samplerate))
 
-        gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, color)
+                    err -= dx
+
+                    if err < 0:
+                        x += sx
+                        err += dy
+
+                    y += sy
+
+        GL.polypoint2D(points, colors)
 
     @staticmethod
     def circle2D(radius, colors):
@@ -124,13 +124,17 @@ class GL:
         # um círculo.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Circle2D
         # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).        
-        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
-        bx = np.arange(0, radius, dtype=np.int32)
-        by = np.arange(0, radius, dtype=np.int32)
+        points = []
+        bx = np.arange(0, radius * GL.samplerate)
+        by = np.arange(0, radius * GL.samplerate)
 
         for i, j in np.ndindex(len(bx), len(by)):
-            if np.hypot(bx[i], by[j]) <= radius:
-                gpu.GPU.draw_pixel((bx[i], by[j]), gpu.GPU.RGB8, color)
+            d = np.hypot(bx[i], by[j])
+            r = radius * GL.samplerate
+            if d <= r and d > r - GL.samplerate:
+                points.extend((bx[i], by[j]))
+
+        GL.polypoint2D(points, colors)
 
     @staticmethod
     def triangleSet2D(vertices, colors):
@@ -143,8 +147,8 @@ class GL:
         # quantidade de pontos é sempre multiplo de 3, ou seja, 6 valores ou 12 valores, etc.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o TriangleSet2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        color = (np.array(colors["emissiveColor"]) * 255).astype(np.int32)
-        p = np.array(vertices, dtype=np.int32).reshape(-1, 2)
+        points = []
+        p = np.array(vertices, dtype=np.int32).reshape(-1, 2) * GL.samplerate
 
         x, y = p.T.astype(np.int32)
         vec = np.diff(np.pad(p.T, ((0, 0), (0, 1)), "wrap"), axis=1).T
@@ -156,7 +160,9 @@ class GL:
             q = np.array((bx[i], by[j])).astype(np.int32)
 
             if all(np.dot(q - o, n) <= 0 for o, n in zip(p, norm)):
-                gpu.GPU.draw_pixel((q[0], q[1]), gpu.GPU.RGB8, color)
+                points.extend((q[0], q[1]))
+
+        GL.polypoint2D(points, colors)
 
     @staticmethod
     def triangleSet(point, colors):
@@ -275,12 +281,11 @@ class GL:
         # Você precisará usar alguma estrutura de dados pilha para organizar as matrizes.
         matrix = GL.transform_translate(translation) @ GL.transform_scale(scale) @ GL.transform_rotate(rotation)
 
-        GL.transform_stack.append(matrix)
+        if len(GL.transform_stack) > 0:
+            matrix = GL.transform_stack[-1] @ matrix
 
-        GL.transform_matrix = GL.transform_stack[-1]
-
-        for layer in GL.transform_stack[:-1:-1]:
-            GL.transform_matrix = GL.transform_matrix @ layer
+        GL.transform_matrix = matrix
+        GL.transform_stack.append(GL.transform_matrix)
 
     @staticmethod
     def transform_out():
@@ -290,15 +295,16 @@ class GL:
         # deverá recuperar a matriz de transformação dos modelos do mundo da estrutura de
         # pilha implementada.
 
-        GL.transform_stack.pop()
-
         if len(GL.transform_stack) == 0:
             return
 
-        GL.transform_matrix = GL.transform_stack[-1]
+        GL.transform_stack.pop()
 
-        for layer in GL.transform_stack[:-1:-1]:
-            GL.transform_matrix = GL.transform_matrix @ layer
+        if len(GL.transform_stack) == 0:
+            GL.transform_matrix = np.identity(4)
+            return
+
+        GL.transform_matrix = GL.transform_stack[-1]
 
     @staticmethod
     def triangleStripSet(point, stripCount, colors):

@@ -249,4 +249,17 @@ class GPU:
 
     @staticmethod
     def swap_buffers():
-        """Método para a troca dos buffers (NÃO IMPLEMENTADA)."""
+        """Método para a troca dos buffers."""
+        read_framebuffer = GPU.frame_buffer[GPU.read_framebuffer].color
+        draw_framebuffer = GPU.frame_buffer[GPU.draw_framebuffer].color
+
+        height_1, width_1, depth_1 = read_framebuffer.shape
+        height_2, width_2, depth_2 = draw_framebuffer.shape
+        v_ratio = height_2 // height_1
+        h_ratio = width_2 // width_1
+
+        GPU.frame_buffer[GPU.read_framebuffer].color = (
+            draw_framebuffer
+            .reshape((height_1, v_ratio, width_1, h_ratio, depth_1))
+            .mean(axis=(1, 3)).astype(read_framebuffer.dtype)
+        )

@@ -26,6 +26,7 @@ ALTURA = 40   # Valor padrão para altura da tela
 
 class Renderizador:
     """Realiza a renderização da cena informada."""
+    scene: x3d.X3D
 
     def __init__(self):
         """Definindo valores padrão."""
@@ -41,13 +42,16 @@ class Renderizador:
         # Configurando color buffers para exibição na tela
 
         # Cria uma (1) posição de FrameBuffer na GPU
-        fbo = gpu.GPU.gen_framebuffers(1)
+        fbo = gpu.GPU.gen_framebuffers(2)
 
         # Define o atributo FRONT como o FrameBuffe principal
-        self.framebuffers["FRONT"] = fbo[0]
+        self.framebuffers["FRONT"] = fbo[1]
+        self.framebuffers["SSAA"] = fbo[0]
 
         # Define que a posição criada será usada para desenho e leitura
-        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
+        gpu.GPU.bind_framebuffer(gpu.GPU.READ_FRAMEBUFFER, self.framebuffers["FRONT"])
+        gpu.GPU.bind_framebuffer(gpu.GPU.DRAW_FRAMEBUFFER, self.framebuffers["SSAA"])
+        # gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SSAA"])
         # Opções:
         # - DRAW_FRAMEBUFFER: Faz o bind só para escrever no framebuffer
         # - READ_FRAMEBUFFER: Faz o bind só para leitura no framebuffer
@@ -61,7 +65,14 @@ class Renderizador:
             gpu.GPU.COLOR_ATTACHMENT,
             gpu.GPU.RGB8,
             self.width,
-            self.height
+            self.height,
+        )
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["SSAA"],
+            gpu.GPU.COLOR_ATTACHMENT,
+            gpu.GPU.RGB8,
+            self.width * 2,
+            self.height * 2,
         )
 
         # Descomente as seguintes linhas se for usar um Framebuffer para profundidade
@@ -177,7 +188,8 @@ class Renderizador:
             self.width,
             self.height,
             near=0.01,
-            far=1000
+            far=1000,
+            samplerate=2,
         )
 
         # Funções que irão fazer o rendering
