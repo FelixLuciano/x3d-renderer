@@ -147,22 +147,19 @@ class GL:
         # quantidade de pontos é sempre multiplo de 3, ou seja, 6 valores ou 12 valores, etc.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o TriangleSet2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        points = []
-        p = np.array(vertices, dtype=np.int32).reshape(-1, 2) * GL.samplerate
+        p = np.array(vertices).reshape(-1, 2) * GL.samplerate
+        x, y = p.T
+        vec = np.diff(p, axis=0, append=p[0:1])
+        norm = vec @ np.array([[0, 1], [-1, 0]])
+        bx = np.arange(np.clip(np.min(x), 0, GL.width - 1), np.clip(np.max(x), 0, GL.width - 1) + 1)
+        by = np.arange(np.clip(np.min(y), 0, GL.height - 1), np.clip(np.max(y), 0, GL.height - 1) + 1)
+        bx_grid, by_grid = np.meshgrid(bx, by, indexing="ij")
+        coords = np.column_stack([bx_grid.ravel(), by_grid.ravel()])
+        diffs = coords[:, np.newaxis, :] - p[np.newaxis, :, :]
+        dot_products = np.einsum('ijk,jk->ij', diffs, norm)
+        mask = np.all(dot_products <= 0, axis=1)
 
-        x, y = p.T.astype(np.int32)
-        vec = np.diff(np.pad(p.T, ((0, 0), (0, 1)), "wrap"), axis=1).T
-        norm = vec @ np.array([[0, 1], [-1, 0]], dtype=np.int32)
-        bx = np.arange(max(0, np.min(x)), min(GL.width - 1, np.max(x)) + 1)
-        by = np.arange(max(0, np.min(y)), min(GL.height - 1, np.max(y)) + 1)
-
-        for i, j in np.ndindex(len(bx), len(by)):
-            q = np.array((bx[i], by[j])).astype(np.int32)
-
-            if all(np.dot(q - o, n) <= 0 for o, n in zip(p, norm)):
-                points.extend((q[0], q[1]))
-
-        GL.polypoint2D(points, colors)
+        GL.polypoint2D(coords[mask].ravel(), colors)
 
     @staticmethod
     def triangleSet(point, colors):
@@ -354,20 +351,40 @@ class GL:
         # primeiro triângulo será com os vértices 0, 1 e 2, depois serão os vértices 1, 2 e 3,
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
-        points = np.array(point).reshape(-1, 3)
 
-        triangles = []
+        start = 0
+        while start < len(index):
+            try:
+                end = index.index(-1, start)
+            except ValueError:
+                break
 
-        for i in range(len(index) - 3):
-            i1, i2, i3 = index[i: i + 3]
-            triangle = [points[i1], points[i2], points[i3]]
+            indexes = index[start:end]
+            i0 = indexes[0] * 3
+            p0 = point[i0 : i0+3]
 
-            if i % 2 == 1:
-                triangle = triangle[::-1]
+            triangles = []
+            for i in range(1, len(indexes) - 1):
+                i1 = indexes[i+0] * 3
+                i2 = indexes[i+1] * 3
+                p1 = point[i1 : i1+3]
+                p2 = point[i2 : i2+3]
 
-            triangles.append(triangle)
+                triangles.append([p0, p1, p2])
+            
+            GL.triangleSet(triangles, colors)
+
+            start = end + 1
         
-        GL.triangleSet(triangles, colors)
+        return
+
+    @staticmethod
+    def triangle_area(p0, p1, p2):
+        x0, y0 = p0
+        x1, y1 = p1
+        x2, y2 = p2
+
+        return np.abs(x0 * (y1 - y2) + x1 * (y2 - y0) + x2 * (y0 - y1)) / 2
 
     @staticmethod
     def indexedFaceSet(coord, coordIndex, colorPerVertex, color, colorIndex,
@@ -392,6 +409,23 @@ class GL:
         # textura para o poligono, para isso, use as coordenadas de textura e depois aplique a
         # cor da textura conforme a posição do mapeamento. Dentro da classe GPU já está
         # implementadado um método para a leitura de imagens.
+
+        print("coord", coord)
+        print("coordIndex", coordIndex)
+        print("colorPerVertex", colorPerVertex)
+        print("color", color)
+        print("colorIndex", colorIndex)
+        print("texCoord", texCoord)
+        print("texCoordIndex", texCoordIndex)
+        print("colors", colors)
+        print("current_texture", current_texture)
+
+        if not colorPerVertex or not color or len(colorIndex) < 4:
+            return GL.indexedTriangleStripSet(coord, coordIndex, colors)
+
+        faces_coords = []
+        faces_colors = []
+
         start = 0
         while start < len(coordIndex):
             try:
@@ -411,10 +445,56 @@ class GL:
                 p2 = coord[i2 : i2+3]
 
                 triangles.append([p0, p1, p2])
-            
-            GL.triangleSet(triangles, colors)
+
+            faces_coords.append(triangles)
+
+            base_color = np.array([color[i*3:(i+1)*3] for i in colorIndex[start:end]]).reshape(3, 3)
+
+            faces_colors.append(np.roll(base_color, 1, axis=0))
 
             start = end + 1
+
+        for (face, base_color) in zip(faces_coords, faces_colors):
+            triangles = np.array(face).reshape(-1, 3, 3)
+
+            for triangle in triangles:
+                p = []
+
+                for vertex in triangle:
+                    v = np.pad(vertex, (0, 1), mode="constant", constant_values=1.0)
+                    v = GL.viewpoint_matrix @ GL.transform_matrix @ v
+                    p_vertex = GL.screen_matrix @ (v / v[3])
+
+                    p.append(p_vertex[0:3])
+
+                p = np.array(p) * GL.samplerate
+                x, y, z = p.T
+                vec = np.diff(p, axis=0, append=p[0:1])
+                norm = vec @ np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]])
+                bx = np.arange(np.clip(np.min(x), 0, GL.width - 1), np.clip(np.max(x), 0, GL.width - 1) + 1)
+                by = np.arange(np.clip(np.min(y), 0, GL.height - 1), np.clip(np.max(y), 0, GL.height - 1) + 1)
+                bx_grid, by_grid = np.meshgrid(bx, by, indexing="ij")
+                coords = np.column_stack([bx_grid.ravel(), by_grid.ravel()])
+                diffs = coords[:, np.newaxis, :] - p[np.newaxis, :, :2]
+                dot_products = np.einsum('ijk,jk->ij', diffs, norm[:, :2])
+                mask = np.all(dot_products <= 0, axis=1)
+                points = coords[mask]
+
+                area = np.abs(np.dot(x, norm.T[1])) / 2
+
+                color_ = (np.array(colors["diffuseColor"]) * 255).astype(np.int32)
+                for p0 in points.astype(np.int32):
+                    area1 = GL.triangle_area(p0, p[0, 0:2], p[1, 0:2])
+                    area2 = GL.triangle_area(p0, p[1, 0:2], p[2, 0:2])
+                    k = np.array([area1, area2, area - area1 - area2]) / area
+                    z_ = 1.0 / np.dot(k, np.divide(1.0, np.abs(z))).sum()
+
+                    # print(True, base_color)
+                    # print(True, k, z_)
+                    color_ = (z_ * ((k / np.abs(z)) @ base_color) * 255).astype(np.int32)
+                    # print(True, color_)
+
+                    gpu.GPU.draw_pixel(p0.tolist(), gpu.GPU.RGB8, color_)
 
     @staticmethod
     def box(size, colors):
